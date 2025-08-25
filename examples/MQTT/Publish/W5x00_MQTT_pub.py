@@ -1,11 +1,13 @@
-import board
-import busio
 import digitalio
 import time
+import board
+if board.board_id in ("wiznet_w55rp20_evb_pico", "wiznet_w6300_evb_pico2"):
+    import wiznet
+else:
+    import busio
 
 from adafruit_wiznet5k.adafruit_wiznet5k import *
-import adafruit_wiznet5k.adafruit_wiznet5k_socket as socket
-
+import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
 import adafruit_minimqtt.adafruit_minimqtt as MQTT
 
 ### MQTT Setup ###
@@ -16,48 +18,32 @@ mqtt_topic = 'WIZnetTest'
 # MQTT Send Message text
 text = "Hello Broker, I'm PICO"
 
-# Set up a MiniMQTT Client
-# NOTE: We'll need to connect insecurely for ethernet configurations.
-mqtt_client = MQTT.MQTT(
-    broker="192.168.1.11",  #setup your PC IP address
-    username="rpi-pico",       
-    password="wiznet",      
-    is_ssl=False,
-    socket_pool=None,
-    ssl_context=None,
-    keep_alive=60,
-)
-   
-#SPI0
-SPI0_SCK = board.GP18
-SPI0_TX = board.GP19
-SPI0_RX = board.GP16
-SPI0_CSn = board.GP17
-
-#Reset
-W5x00_RSTn = board.GP20
-
 print("Wiznet5k MQTT Test (DHCP)")
 # Setup your network configuration below
 # random MAC, later should change this value on your vendor ID
-MY_MAC = (0x00, 0x01, 0x02, 0x03, 0x04, 0x05)
+MY_MAC = "00:01:02:03:04:05"
 IP_ADDRESS = (192, 168, 1, 100)
 SUBNET_MASK = (255, 255, 255, 0)
 GATEWAY_ADDRESS = (192, 168, 1, 1)
 DNS_SERVER = (8, 8, 8, 8)
 
-led = digitalio.DigitalInOut(board.GP25)
+led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
-ethernetRst = digitalio.DigitalInOut(W5x00_RSTn)
+ethernetRst = digitalio.DigitalInOut(board.W5K_RST)
 ethernetRst.direction = digitalio.Direction.OUTPUT
 
 # For Adafruit Ethernet FeatherWing
-cs = digitalio.DigitalInOut(SPI0_CSn)
+cs = digitalio.DigitalInOut(board.W5K_CS)
 # For Particle Ethernet FeatherWing
 # cs = digitalio.DigitalInOut(board.D5)
 
-spi_bus = busio.SPI(SPI0_SCK, MOSI=SPI0_TX, MISO=SPI0_RX)
+if board.board_id == "wiznet_w55rp20_evb_pico":
+    spi_bus = wiznet.PIO_SPI(board.W5K_SCK, MOSI=board.W5K_MOSI, MISO=board.W5K_MISO)
+elif board.board_id == "wiznet_w6300_evb_pico2":
+    spi_bus = wiznet.PIO_SPI(board.W5K_SCK, quad_io0=board.W5K_MOSI, quad_io1=board.W5K_MISO, quad_io2=board.W5K_IO2, quad_io3=board.W5K_IO3)
+else:
+    spi_bus = busio.SPI(board.W5K_SCK, MOSI=board.W5K_MOSI, MISO=board.W5K_MISO)
 
 # Reset W5500 first
 ethernetRst.value = False
@@ -76,8 +62,19 @@ print("Chip Version:", eth.chip)
 print("MAC Address:", [hex(i) for i in eth.mac_address])
 print("My IP address is:", eth.pretty_ip(eth.ip_address))
 
-# Initialize MQTT interface with the ethernet interface
-MQTT.set_socket(socket, eth)
+pool = socketpool.SocketPool(eth)
+
+# Set up a MiniMQTT Client
+# NOTE: We'll need to connect insecurely for ethernet configurations.
+mqtt_client = MQTT.MQTT(
+    broker="192.168.1.11",  #setup your PC IP address
+    username="rpi-pico",       
+    password="wiznet",      
+    is_ssl=False,
+    socket_pool=pool,
+    ssl_context=None,
+    keep_alive=60,
+)
 
 # Connect the client to the MQTT broker.
 print("Connecting to Broker...")

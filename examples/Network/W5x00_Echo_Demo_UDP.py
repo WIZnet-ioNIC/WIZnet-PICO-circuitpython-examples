@@ -1,41 +1,41 @@
-import board
-import busio
 import digitalio
 import time
+import board
+if board.board_id in ("wiznet_w55rp20_evb_pico", "wiznet_w6300_evb_pico2"):
+    import wiznet
+else:
+    import busio
+    
 from adafruit_wiznet5k.adafruit_wiznet5k import WIZNET5K
-import adafruit_wiznet5k.adafruit_wiznet5k_socket as socket
-
-##SPI0
-SPI0_SCK = board.GP18
-SPI0_TX = board.GP19
-SPI0_RX = board.GP16
-SPI0_CSn = board.GP17
-
-##reset
-W5x00_RSTn = board.GP20
+import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
 
 print("Wiznet5k SimpleServer Test (DHCP)")
 
 # Setup your network configuration below
 # random MAC, later should change this value on your vendor ID
-MY_MAC = (0x00, 0x01, 0x02, 0x03, 0x04, 0x05)
+MY_MAC = "00:01:02:03:04:05"
 IP_ADDRESS = (192, 168, 1, 111)
 SUBNET_MASK = (255, 255, 255, 0)
 GATEWAY_ADDRESS = (192, 168, 1, 1)
 DNS_SERVER = (8, 8, 8, 8)
 
-led = digitalio.DigitalInOut(board.GP25)
+led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
-ethernetRst = digitalio.DigitalInOut(W5x00_RSTn)
+ethernetRst = digitalio.DigitalInOut(board.W5K_RST)
 ethernetRst.direction = digitalio.Direction.OUTPUT
 
 # For Adafruit Ethernet FeatherWing
-cs = digitalio.DigitalInOut(SPI0_CSn)
+cs = digitalio.DigitalInOut(board.W5K_CS)
 # For Particle Ethernet FeatherWing
 # cs = digitalio.DigitalInOut(board.D5)
 
-spi_bus = busio.SPI(SPI0_SCK, MOSI=SPI0_TX, MISO=SPI0_RX)
+if board.board_id == "wiznet_w55rp20_evb_pico":
+    spi_bus = wiznet.PIO_SPI(board.W5K_SCK, MOSI=board.W5K_MOSI, MISO=board.W5K_MISO)
+elif board.board_id == "wiznet_w6300_evb_pico2":
+    spi_bus = wiznet.PIO_SPI(board.W5K_SCK, quad_io0=board.W5K_MOSI, quad_io1=board.W5K_MISO, quad_io2=board.W5K_IO2, quad_io3=board.W5K_IO3)
+else:
+    spi_bus = busio.SPI(board.W5K_SCK, MOSI=board.W5K_MOSI, MISO=board.W5K_MISO)
 
 # Reset W5500 first
 ethernetRst.value = False
@@ -54,11 +54,10 @@ print("Chip Version:", eth.chip)
 print("MAC Address:", [hex(i) for i in eth.mac_address])
 print("My IP address is:", eth.pretty_ip(eth.ip_address))
 
-# Initialize a socket for our server
-socket.set_interface(eth)
-
-server = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)  # Allocate socket for the server
-server_ip = '192.168.0.200'  # IP address of server
+# # Initialize a socket for our server
+pool = socketpool.SocketPool(eth)
+server = socketpool.Socket(pool, pool.AF_INET, pool.SOCK_DGRAM)  # Allocate socket for the server
+server_ip = eth.pretty_ip(eth.ip_address)  # IP address of server
 server_port = 5000  # Port to listen on
 port = 5000
 server.bind((eth.pretty_ip(eth.ip_address),port))

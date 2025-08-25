@@ -3,13 +3,10 @@ import time
 import board
 import digitalio
 
-W5x00_RSTn = board.GP20
-
-# led = digitalio.DigitalInOut(board.LED)
-led = digitalio.DigitalInOut(board.GP25)
+led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
-ethernetRst = digitalio.DigitalInOut(W5x00_RSTn)
+ethernetRst = digitalio.DigitalInOut(board.W5K_RST)
 ethernetRst.direction = digitalio.Direction.OUTPUT
 
 while True:

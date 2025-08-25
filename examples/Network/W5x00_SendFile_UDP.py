@@ -1,50 +1,50 @@
-import board
-import busio
 import digitalio
 import time
+import board
+if board.board_id in ("wiznet_w55rp20_evb_pico", "wiznet_w6300_evb_pico2"):
+    import wiznet
+else:
+    import busio
+    
 from adafruit_wiznet5k.adafruit_wiznet5k import *
-import adafruit_wiznet5k.adafruit_wiznet5k_socket as socket
+import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
 import sys
 import os
 
-##SPI0
-SPI0_SCK = board.GP18
-SPI0_TX = board.GP19
-SPI0_RX = board.GP16
-SPI0_CSn = board.GP17
-
-##reset
-W5x00_RSTn = board.GP20
-
 print("Send the files using Wiznet5k UDP")
+
 # Setup your network configuration below
 # random MAC, later should change this value on your vendor ID
-MY_MAC = (0x00, 0x01, 0x02, 0x03, 0x04, 0x05)
+MY_MAC = "00:01:02:03:04:05"
 IP_ADDRESS = (192, 168, 1, 111)
 SUBNET_MASK = (255, 255, 255, 0)
 GATEWAY_ADDRESS = (192, 168, 1, 1)
 DNS_SERVER = (8, 8, 8, 8)
 port = 5001
 MAX_SIZE = 1024
-led = digitalio.DigitalInOut(board.GP25)
+
+led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
-ethernetRst = digitalio.DigitalInOut(W5x00_RSTn)
+ethernetRst = digitalio.DigitalInOut(board.W5K_RST)
 ethernetRst.direction = digitalio.Direction.OUTPUT
 
 # For Adafruit Ethernet FeatherWing
-cs = digitalio.DigitalInOut(SPI0_CSn)
+cs = digitalio.DigitalInOut(board.W5K_CS)
 # For Particle Ethernet FeatherWing
 # cs = digitalio.DigitalInOut(board.D5)
 
-spi_bus = busio.SPI(SPI0_SCK, MOSI=SPI0_TX, MISO=SPI0_RX)
+if board.board_id == "wiznet_w55rp20_evb_pico":
+    spi_bus = wiznet.PIO_SPI(board.W5K_SCK, MOSI=board.W5K_MOSI, MISO=board.W5K_MISO)
+elif board.board_id == "wiznet_w6300_evb_pico2":
+    spi_bus = wiznet.PIO_SPI(board.W5K_SCK, quad_io0=board.W5K_MOSI, quad_io1=board.W5K_MISO, quad_io2=board.W5K_IO2, quad_io3=board.W5K_IO3)
+else:
+    spi_bus = busio.SPI(board.W5K_SCK, MOSI=board.W5K_MOSI, MISO=board.W5K_MISO)
 
 # Reset W5500 first
 ethernetRst.value = False
 time.sleep(1)
 ethernetRst.value = True
-
-
 
 # # Initialize ethernet interface without DHCP
 # eth = WIZNET5K(spi_bus, cs, is_dhcp=False, mac=MY_MAC, debug=False)
@@ -56,17 +56,15 @@ eth = WIZNET5K(spi_bus, cs, is_dhcp=False, mac=MY_MAC, debug=False)
 #if eth() != True :
 eth.ifconfig = (IP_ADDRESS, SUBNET_MASK, GATEWAY_ADDRESS, DNS_SERVER)
 
-
 # Initialize a socket for our server
-socket.set_interface(eth)
-sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)  # Allocate socket for the server
+pool = socketpool.SocketPool(eth)
+sock = socketpool.Socket(pool, pool.AF_INET, pool.SOCK_DGRAM)  # Allocate socket for the server
 server_ip = '192.168.1.200'  # IP address of server
 server_port = 5000  # Port to listen on
 
 print("Chip Version:", eth.chip)
 print("MAC Address:", [hex(i) for i in eth.mac_address])
 print("My IP address is:", eth.pretty_ip(eth.ip_address))
-
 
 class file:
     count=0
@@ -95,7 +93,7 @@ while True: #Loop
 
     if filename == '/exit':
         sys.exit()
-    socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    sock = socketpool.Socket(pool, pool.AF_INET, pool.SOCK_DGRAM)
     sock.bind((eth.pretty_ip(eth.ip_address),port))
 
     data = file.sendfile(filename)  
