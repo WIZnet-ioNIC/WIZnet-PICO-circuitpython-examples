@@ -14,14 +14,13 @@
 
 ## Step 2: Prepare hardware
 
-1. Combine WIZnet Ethernet HAT with Raspberry Pi Pico.
-2. Connect ethernet cable to Ethernet HAT ethernet port.
-3. Connect Raspberry Pi Pico to desktop or laptop using 5 pin micro USB cable.
+If you are using WIZnet's PICO board, you can skip '1. Combine...'
 
+1. If you are using WIZnet Ethernet HAT, Combine it with Raspberry Pi Pico.
 
+2. Connect ethernet cable to your PICO board ethernet port.
 
-If you use W5100S-EVB-Pico, you can skip '1. Combine...'
-
+3. Connect your PICO board to desktop or laptop using USB cable. 
 
 
 ## Step 3: Setup Webserver Example
@@ -29,27 +28,13 @@ If you use W5100S-EVB-Pico, you can skip '1. Combine...'
 > To test the **Webserver example**, minor settings shall be done in code.
 
 
-
-1. Setup SPI and Reset pin.
-
-```python
-##SPI0
-SPI0_SCK = board.GP18
-SPI0_TX = board.GP19
-SPI0_RX = board.GP16
-SPI0_CSn = board.GP17
-
-##reset
-W5x00_RSTn = board.GP20
-```
-
-2. Initialize ethernet interface with DHCP
+1. Initialize ethernet interface with DHCP
 
 ```python
 eth = WIZNET5K(spi_bus, cs, is_dhcp=True, mac=MY_MAC, debug=False)
 ```
 
-3. HTML request
+2. HTML request
 
 ```python
 html_string = '''
@@ -82,7 +67,7 @@ My IP address is $IPADDRESS<br>
 '''
 ```
 
-4. Run Pico to open the web server.
+3. Run Pico to open the web server.
 
 ```python
 # Start the server
@@ -96,7 +81,7 @@ while True:
     # Could do any other background tasks here, like reading sensors
 ```
 
-5. Copy **Webserver code** to **code.py** on your RPi Pico and save. Make sure that PC is configured in same subnet 192.168.1.xxx.
+4. Copy **Webserver code** to **code.py** on your RPi Pico and save. Make sure that PC is configured in same subnet 192.168.1.xxx.
 
 
 

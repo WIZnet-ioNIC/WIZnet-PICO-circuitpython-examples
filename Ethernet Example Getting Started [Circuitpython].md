@@ -24,41 +24,18 @@
 
 # :hammer:Hardware requirements
 
-> The ethernet examples use **Raspberry Pi Pico** and **WIZnet Ethernet HAT** ethernet I/O module built on WIZnet's [**W5100S**][link-w5100s] ethernet chip or **W5100S-EVB-Pico** ethernet I/O module built on [**RP2040**][link-rp2040] and WIZnet's [**W5100S**][link-w5100s] ethernet chip.
+The Ethernet examples are compatible with the following Raspberry Pi-compatible WIZnet Ethernet I/O modules. These modules integrate **WIZnet Ethernet chips** with either the **RP2040** or **RP2350** microcontrollers.
 
-| Image                                                        | Name                                                      | Etc                                                          |
-| ------------------------------------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------ |
-| <image src= "./images/START/raspberrypi_pico.png" width="200px" height="110px"> | [**Raspberry Pi Pico**][link-raspberry_pi_pico]           | [Pico Document](https://www.raspberrypi.org/documentation/microcontrollers/raspberry-pi-pico.html) |
-| <image src= "./images/START/WIZnet-Ethernet-HAT-1.png" width="240px" height="80px"> | [**WIZnet Ethernet HAT**][link-wiznet_ethernet_hat]       | [Ethernet HAT Datasheet](https://docs.wiznet.io/Product/Open-Source-Hardware/wiznet_ethernet_hat) |
-| <image src= "./images/START/W5100S-EVB-Pico_1.png" width="250px" height="90px"> | [**WIZnet W5100S-EVB-Pico**][link-wiznet_W5100S_evb_pico] | [W5100S-EVB-Pico Datasheet][link-wiznet_W5100S_evb_pico]     |
+| Board/Module Name              | MCU      | Ethernet Chip  | Interface     | Socket # | TX/RX Buffer  | Notes                                  |
+|--------------------------------|----------|----------------|---------------|----------|---------------|----------------------------------------|
+| **[WIZnet Ethernet HAT][link-wiznet_ethernet_hat]** |  | W5100S | SPI | 4 | 16KB | RP Pico-compatible |
+| **[W5100S-EVB-Pico][link-w5100s-evb-pico]** | RP2040 | W5100S | SPI | 4 | 16KB |  |
+| **[W5500-EVB-Pico][link-w5500-evb-pico]** | RP2040 | W5500 | SPI | 8 | 32KB |  |
+| **[W55RP20-EVB-Pico][link-w55rp20-evb-pico]** | RP2040 | W5500 | SPI (PIO) | 8 | 32KB | SiP: RP2040 + W5500 |
+| **[W5100S-EVB-Pico2][link-w5100s-evb-pico2]** | RP2350 | W5100S | SPI | 4 | 16KB |  |
+| **[W5500-EVB-Pico2][link-w5500-evb-pico2]** | RP2350 | W5500 | SPI | 8 | 32KB |  |
+| **[W6300-EVB-Pico2][link-w6300-evb-pico2]** | RP2350 | W6300 | QSPI (PIO) | 8 | 64KB | Supports IPv4/IPv6 |
 
-> ### Pin Diagram
-
-**`WIZnet Ethernet HAT`**
-
-Ethernet-HAT has the same pin arrangement and pin spacing as Raspberry Pi Pico. The W5100S and RJ45 are built-in, Ethernet can be used by plugging into the Raspberry pi pico. **One thing to note when using HAT is to look carefully at the direction and plug it in**. There is a USB shape marked, and this direction and the USB direction of Pico must be the same.
-
-![][link-PICO_HAT]
-
-------
-
-**`WIZnet W5100S-EVB-Pico`**
-
-In the W5100S-EVB-Pico board, GPIO pins are connected the same as the Raspberry Pi Pico board.  If Pico uses Ethernet, **PIO16, GPIO17, GPIO18, GPIO19, GPIO20**, and **GPIO21** pins cannot be used. It is a pin used inside the RP2040 board.
-
-![][link-PICO_EVB]
-
-| I/O  | Pin Name | Description                                    |
-| :--- | -------- | ---------------------------------------------- |
-| I    | GPIO16   | Connected to **MISO** on W5100S                |
-| O    | GPIO17   | Connected to **CSn** on W5100S                 |
-| O    | GPIO18   | Connected to **SCLK** on W5100S                |
-| O    | GPIO19   | Connected to **MOSI** on W5100S                |
-| O    | GPIO20   | Connected to **RSTn** on W5100S                |
-| I    | GPIO21   | Connected to **INTn** on W5100S                |
-| I    | GPIO24   | VBUS sense - high if VBUS is present, else low |
-| O    | GPIO25   | Connected to user LED                          |
-| I    | GPIO25   | Used in ADC mode (ADC3) to measure VSYS/3      |
 
 <a name="development_environment_configuration"></a>
 
@@ -149,7 +126,7 @@ Ethernet examples are available at '**RP2040-HAT-CircuitPython/example/**' direc
 
 Check if the network is connected normally and if the data is sent to each other.
 
-[W5x00_Ping_Test.py](https://github.com/Wiznet/RP2040-HAT-CircuitPython/blob/master/examples/Network/W5x00_Ping_Test.py)
+[W5x00_Ping_Test.py](https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/blob/master/examples/Network/W5x00_Ping_Test.py)
 
 > This is the code to set the IP of 192.168.1.100
 >
@@ -197,15 +174,6 @@ Documentation for WIZnet Ethernet HAT and Raspberry pi pico board
 
  C/C++ development with Raspberry Pi Pico and other RP2040-based microcontroller boards
 
-## WIZnet Ethernet HAT & EVB
- [**WIZnet Ethernet HAT**](https://docs.wiznet.io/Product/Open-Source-Hardware/wiznet_ethernet_hat)
-
- [**W5100S-EVB-Pico**](https://docs.wiznet.io/Product/iEthernet/W5100S/w5100s-evb-pico)
-
-Please refer to 'README.md' in each examples directory to find detail guide for testing ethernet examples.
-
-
-
 
 
 <!--
@@ -231,28 +199,41 @@ Link
 [link-PICO_HAT]:https://github.com/Wiznet/RP2040-HAT-CircuitPython/blob/master/images/START/HAT.png
 [link-PICO_EVB]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/blob/master/images/START/EVB.png
 
+[link-wiznet_ethernet_chips]: https://docs.wiznet.io/Product/iEthernet#product-family
+[link-w55rp20-evb-pico]: https://docs.wiznet.io/Product/ioNIC/W55RP20/w55rp20-evb-pico
+[link-raspberry_pi_pico]: https://www.raspberrypi.com/products/raspberry-pi-pico/
+[link-wiznet_ethernet_hat]: https://docs.wiznet.io/Product/Open-Source-Hardware/wiznet_ethernet_hat
+[link-w5100s-evb-pico]: https://docs.wiznet.io/Product/iEthernet/W5100S/w5100s-evb-pico
+[link-w5500-evb-pico]: https://docs.wiznet.io/Product/iEthernet/W5500/w5500-evb-pico
+[link-w6100-evb-pico]: https://docs.wiznet.io/Product/iEthernet/W6100/w6100-evb-pico
+[link-w6300-evb-pico]: https://docs.wiznet.io/Product/iEthernet/W6300/w6300-evb-pico
+[link-w5100s-evb-pico2]: https://docs.wiznet.io/Product/iEthernet/W5100S/w5100s-evb-pico2
+[link-w5500-evb-pico2]: https://docs.wiznet.io/Product/iEthernet/W5500/w5500-evb-pico2
+[link-w6100-evb-pico2]: https://docs.wiznet.io/Product/iEthernet/W6100/w6100-evb-pico2
+[link-w6300-evb-pico2]: https://docs.wiznet.io/Product/iEthernet/W6300/w6300-evb-pico2
+
 [link-raspberry_pi_pico]: https://www.raspberrypi.org/products/raspberry-pi-pico
 [link-wiznet_ethernet_hat]: https://docs.wiznet.io/Product/Open-Source-Hardware/wiznet_ethernet_hat
 [link-wiznet_W5100S_evb_pico]:https://docs.wiznet.io/Product/iEthernet/W5100S/w5100s-evb-pico
-[link-library]:https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/libraries/adafruit_wiznet5k
+[link-library]:https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/libraries/adafruit_wiznet5k
 
 
 
-[link-DHCP]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/DHCP
-[link-Network]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/Network
-[link-loopback]:  https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/Loopback
-[link-DNS]:  https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/DNS
-[link-WebServer]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/HTTP/Webserver
-[link-HTTP]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/HTTP
-[link-WebClient]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/HTTP/Webclient
-[link-MQTT]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/MQTT
-[link-MQTT_Pub]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/MQTT/Publish
-[link-MQTT_Sub]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/MQTT/Subscribe
-[link-pubsub]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/MQTT/PubSub
-[link-SNTP]:  https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/SNTP
-[link-adafruit_io]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/Adafruit_IO
-[link-uplink]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/Adafruit_IO/UpLink
-[link-downlink]: https://github.com/Wiznet/RP2040-HAT-CircuitPython/tree/master/examples/Adafruit_IO/DownLink
+[link-DHCP]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/DHCP
+[link-Network]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/Network
+[link-loopback]:  https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/Loopback
+[link-DNS]:  https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/DNS
+[link-WebServer]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/HTTP/Webserver
+[link-HTTP]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/HTTP
+[link-WebClient]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/HTTP/Webclient
+[link-MQTT]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/MQTT
+[link-MQTT_Pub]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/MQTT/Publish
+[link-MQTT_Sub]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/MQTT/Subscribe
+[link-pubsub]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/MQTT/PubSub
+[link-SNTP]:  https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/SNTP
+[link-adafruit_io]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/Adafruit_IO
+[link-uplink]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/Adafruit_IO/UpLink
+[link-downlink]: https://github.com/WIZnet-ioNIC/WIZnet-PICO-circuitpython-examples/tree/master/examples/Adafruit_IO/DownLink
 
 
 

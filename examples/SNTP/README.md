@@ -12,14 +12,13 @@
 
 ## Step 2: Prepare hardware
 
-1. Combine WIZnet Ethernet HAT with Raspberry Pi Pico.
-2. Connect ethernet cable to Ethernet HAT ethernet port.
-3. Connect Raspberry Pi Pico to desktop or laptop using 5 pin micro USB cable.
+If you are using WIZnet's PICO board, you can skip '1. Combine...'
 
+1. If you are using WIZnet Ethernet HAT, Combine it with Raspberry Pi Pico.
 
+2. Connect ethernet cable to your PICO board ethernet port.
 
-If you use W5x00-EVB-Pico, you can skip '1. Combine...'
-
+3. Connect your PICO board to desktop or laptop using USB cable. 
 
 
 ## Step 3: Setup SNTP Example
@@ -36,20 +35,7 @@ from adafruit_wiznet5k.wiznet5k_ntp import NTP
 days = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
 ```
 
-2. Setup **SPI** and **Reset** pin.
-
-```python
-##SPI0
-SPI0_SCK = board.GP18
-SPI0_TX = board.GP19
-SPI0_RX = board.GP16
-SPI0_CSn = board.GP17
-
-##reset
-W5x00_RSTn = board.GP20
-```
-
-3. Initialize **DHCP**
+2. Initialize **DHCP**
 
 ```python
 # Setup your network configuration below
@@ -62,7 +48,7 @@ MY_MAC = (0x00, 0x01, 0x02, 0x03, 0x04, 0x05)
 eth = WIZNET5K(spi_bus, cs, is_dhcp=True, mac=MY_MAC, debug=False)
 ```
 
-4. Convert the **URL** of the server and get time information through **NTP**.
+3. Convert the **URL** of the server and get time information through **NTP**.
 
 ```python
 #NTP
@@ -74,7 +60,7 @@ print("The date is %s %d/%d/%d" %(days[cal.tm_wday], cal.tm_mday,cal.tm_mon,cal.
 print("The time is %d:%02d:%02d" %(cal.tm_hour,cal.tm_min,cal.tm_sec))
 ```
 
-5. Copy **SNTP code** to **code.py** on your RPi Pico and save. Make sure that PC is configured in same subnet 192.168.1.xxx.
+4. Copy **SNTP code** to **code.py** on your RPi Pico and save. Make sure that PC is configured in same subnet 192.168.1.xxx.
 
 
 

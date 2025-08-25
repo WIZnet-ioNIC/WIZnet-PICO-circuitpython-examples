@@ -12,13 +12,13 @@
 
 ## Step 2: Prepare hardware
 
-1. Combine WIZnet Ethernet HAT with Raspberry Pi Pico.
-2. Connect ethernet cable to Ethernet HAT ethernet port.
-3. Connect Raspberry Pi Pico to desktop or laptop using 5 pin micro USB cable.
+If you are using WIZnet's PICO board, you can skip '1. Combine...'
 
+1. If you are using WIZnet Ethernet HAT, Combine it with Raspberry Pi Pico.
 
+2. Connect ethernet cable to your PICO board ethernet port.
 
-If you use W5100S-EVB-Pico, you can skip '1. Combine...'
+3. Connect your PICO board to desktop or laptop using USB cable. 
 
 
 
@@ -26,22 +26,9 @@ If you use W5100S-EVB-Pico, you can skip '1. Combine...'
 
 To test the **DHCP example**, minor settings shall be done in code.
 
-1. Setup SPI0 and Reset pin.
+1. Initialize DHCP
 
-```python
-##SPI0
-SPI0_SCK = board.GP18
-SPI0_TX = board.GP19
-SPI0_RX = board.GP16
-SPI0_CSn = board.GP17
-
-##reset
-W5x00_RSTn = board.GP20
-```
-
-2. Initialize DHCP
-
-   2-1. Set **IP address** and disable DHCP.
+   1-1. Set **IP address** and disable DHCP.
 
    ```python
    # Setup your network configuration below
@@ -62,7 +49,7 @@ W5x00_RSTn = board.GP20
 
    
 
-   2-2. enable DHCP
+   1-2. enable DHCP
 
    ```python
    # Setup your network configuration below
@@ -77,7 +64,7 @@ W5x00_RSTn = board.GP20
 
    
 
-3. Copy **DHCP code** to **code.py** on your RPi Pico and save. This DHCP enable code sets IP to 192.168.1.100. Make sure that PC is configured in same subnet 192.168.1.xxx.
+2. Copy **DHCP code** to **code.py** on your RPi Pico and save. This DHCP enable code sets IP to 192.168.1.100. Make sure that PC is configured in same subnet 192.168.1.xxx.
 
 
 
