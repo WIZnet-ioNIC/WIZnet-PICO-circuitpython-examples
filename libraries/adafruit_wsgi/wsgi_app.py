@@ -28,9 +28,14 @@ Implementation Notes
 
 import re
 
+try:
+    from typing import Any, AnyStr, Callable, Dict, List, Optional, Sequence, Tuple
+except ImportError:
+    pass
+
 from adafruit_wsgi.request import Request
 
-__version__ = "0.0.0-auto.0"
+__version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_WSGI.git"
 
 
@@ -43,7 +48,7 @@ class WSGIApp:
         self._routes = []
         self._variable_re = re.compile("^<([a-zA-Z]+)>$")
 
-    def __call__(self, environ, start_response):
+    def __call__(self, environ: Dict[str, str], start_response: Callable):
         """
         Called whenever the server gets a request.
         The environ dict has details about the request per wsgi specification.
@@ -61,12 +66,17 @@ class WSGIApp:
 
         if match:
             args, route = match
-            status, headers, resp_data = route["func"](request, *args)
-
+            try:
+                status, headers, resp_data = route["func"](request, *args)
+            except (ValueError, TypeError) as err:
+                raise RuntimeError(
+                    "Proper HTTP response not returned by request handler for path "
+                    + f"'{request.path}'"
+                ) from err
         start_response(status, headers)
         return resp_data
 
-    def on_request(self, methods, rule, request_handler):
+    def on_request(self, methods: List[str], rule: str, request_handler: Callable):
         """
         Register a Request Handler for a particular HTTP method and path.
         request_handler will be called whenever a matching HTTP request is received.
@@ -87,15 +97,13 @@ class WSGIApp:
             if var:
                 # If named capture groups ever become a thing, use this regex instead
                 # regex += "(?P<" + var.group("var") + r">[a-zA-Z0-9_-]*)\/"
-                regex += r"([a-zA-Z0-9_-]+)\/"
+                regex += r"([a-zA-Z0-9\._-]+)\/"
             else:
                 regex += part + r"\/"
         regex += "?$"  # make last slash optional and that we only allow full matches
-        self._routes.append(
-            (re.compile(regex), {"methods": methods, "func": request_handler})
-        )
+        self._routes.append((re.compile(regex), {"methods": methods, "func": request_handler}))
 
-    def route(self, rule, methods=None):
+    def route(self, rule: str, methods: Optional[List[str]] = None):
         """
         A decorator to register a route rule with an endpoint function.
         if no methods are provided, default to GET
@@ -104,9 +112,11 @@ class WSGIApp:
             methods = ["GET"]
         return lambda func: self.on_request(methods, rule, func)
 
-    def _match_route(self, path, method):
+    def _match_route(
+        self, path: str, method: str
+    ) -> Optional[Tuple[Sequence[AnyStr], Dict[str, Any]]]:
         for matcher, route in self._routes:
             match = matcher.match(path)
             if match and method in route["methods"]:
-                return (match.groups(), route)
+                return match.groups(), route
         return None

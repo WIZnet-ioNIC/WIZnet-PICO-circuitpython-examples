@@ -19,7 +19,7 @@ Implementation Notes
 """
 import time
 
-import adafruit_wiznet5k.adafruit_wiznet5k_socket as socket
+import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as pool
 from adafruit_wiznet5k.adafruit_wiznet5k_socket import htons
 
 
@@ -27,12 +27,14 @@ from adafruit_wiznet5k.adafruit_wiznet5k_socket import htons
 ##__repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_NTP.git"
 
 
+
 class NTP:
     def __init__(self, iface, ntp_address,utc,debug=False):
         self._debug = debug
         self._iface = iface
-        socket.set_interface(self._iface)
-        self._sock = socket.socket(type=socket.SOCK_DGRAM)
+        # socketpool.set_interface(self._iface)
+        self._pool = pool.SocketPool(self._iface)
+        self._sock = self._pool.socket(type=self._pool.SOCK_DGRAM)
         self._sock.settimeout(1)
         self._utc = utc
 
@@ -53,7 +55,7 @@ class NTP:
         self._sock.bind((None,50001))
         self._sock.sendto(self._pkt_buf_,(self._ntp_server, 123))
         while True:
-            data = self._sock.recv()
+            data = self._sock.recv(48)
             if data: 
                 sec = data[40:44]
                 int_cal = int.from_bytes(sec,"big")

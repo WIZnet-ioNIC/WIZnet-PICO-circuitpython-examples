@@ -26,9 +26,9 @@ except ImportError:
 
 
 import gc
-import time
 from random import randint
 from micropython import const
+from adafruit_ticks import ticks_ms, ticks_diff, ticks_add, ticks_less
 from adafruit_wiznet5k.adafruit_wiznet5k_debug import (  # pylint: disable=ungrouped-imports
     debug_msg,
 )
@@ -151,7 +151,7 @@ class DHCP:
         # DHCP state machine
         self._dhcp_state = _STATE_INIT
         self._transaction_id = randint(1, 0x7FFFFFFF)
-        self._start_time = 0.0
+        self._start_ticks = 0
         self._blocking = False
         self._renew = None
 
@@ -163,9 +163,12 @@ class DHCP:
         self.dns_server_ip = _UNASSIGNED_IP_ADDR
 
         # Lease expiry times
-        self._t1 = 0
-        self._t2 = 0
-        self._lease = 0
+        self._t1_timeout = 0
+        self._t2_timeout = 0
+        self._lease_timeout = 0
+        self._t1 = None
+        self._t2 = None
+        self._lease = None
 
         # Host name
         mac_string = "".join("{:02X}".format(o) for o in mac_address)
@@ -208,14 +211,17 @@ class DHCP:
         self.dns_server_ip = _UNASSIGNED_IP_ADDR
         self._renew = None
         self._increment_transaction_id()
-        self._start_time = time.monotonic()
+        self._start_ticks = ticks_ms()
+        self._lease = None
+        self._t1 = None
+        self._t2 = None
 
     def _increment_transaction_id(self) -> None:
         """Increment the transaction ID and roll over from 0x7fffffff to 0."""
         debug_msg("Incrementing transaction ID", self._debug)
         self._transaction_id = (self._transaction_id + 1) & 0x7FFFFFFF
 
-    def _next_retry_time(self, *, attempt: int, interval: int = 4) -> float:
+    def _next_retry_time(self, *, attempt: int, interval: int = 4) -> int:
         """Calculate a retry stop time.
 
         The interval is calculated as an exponential fallback with a random variation to
@@ -227,7 +233,7 @@ class DHCP:
         :param int interval: The base retry interval in seconds. Defaults to 4 as per the
             DHCP standard for Ethernet connections. Minimum value 2, defaults to 4.
 
-        :returns float: The timeout in time.monotonic() seconds.
+        :returns int: The timeout in ticks_ms milliseconds.
 
         :raises ValueError: If the interval is not > 1 second as this could return a zero or
             negative delay.
@@ -235,10 +241,10 @@ class DHCP:
         debug_msg("Calculating next retry time and incrementing retries.", self._debug)
         if interval <= 1:
             raise ValueError("Retry interval must be > 1 second.")
-        delay = 2**attempt * interval + randint(-1, 1) + time.monotonic()
+        delay = (2**attempt * interval + randint(-1, 1)) * 1000
         return delay
 
-    def _receive_dhcp_response(self, socket_num: int, timeout: float) -> int:
+    def _receive_dhcp_response(self, socket_num: int, timeout: int) -> int:
         """
         Receive data from the socket in response to a DHCP query.
 
@@ -249,12 +255,13 @@ class DHCP:
         maximum packet size is limited by the size of the global buffer.
 
         :param int socket_num: Socket to read from.
-        :param float timeout: time.monotonic at which attempt should time out.
+        :param int timeout: ticks_ms interval at which attempt should time out.
 
         :returns int: The number of bytes stored in the global buffer.
         """
         debug_msg("Receiving a DHCP response.", self._debug)
-        while time.monotonic() < timeout:
+        start_time = ticks_ms()
+        while ticks_diff(ticks_ms(), start_time) < timeout:
             # DHCP returns the query plus additional data. The query length is 236 bytes.
             if self._eth.socket_available(socket_num, _SNMR_UDP) > 236:
                 bytes_count, bytes_read = self._eth.read_udp(socket_num, _BUFF_LENGTH)
@@ -285,9 +292,14 @@ class DHCP:
                 self._dhcp_state = _STATE_INIT
             elif message_type == _DHCP_ACK:
                 debug_msg("Message is ACK, setting FSM state to BOUND.", self._debug)
-                self._t1 = self._start_time + self._lease // 2
-                self._t2 = self._start_time + self._lease - self._lease // 8
-                self._lease += self._start_time
+                lease = self._lease or 60
+                self._lease_timeout = ticks_add(self._start_ticks, lease * 1000)
+                self._t1_timeout = ticks_add(
+                    self._start_ticks, (self._t1 or (lease // 2)) * 1000
+                )
+                self._t2_timeout = ticks_add(
+                    self._start_ticks, (self._t2 or (lease - lease // 8)) * 1000
+                )
                 self._increment_transaction_id()
                 if not self._renew:
                     self._eth.ifconfig = (
@@ -330,13 +342,14 @@ class DHCP:
         else:
             dhcp_server = _BROADCAST_SERVER_ADDR
         sock_num = None
-        deadline = time.monotonic() + 5.0
+        deadline = 5000
+        start_time = ticks_ms()
         try:
             while sock_num is None:
                 sock_num = self._eth.get_socket()
                 if sock_num == 0xFF:
                     sock_num = None
-                if time.monotonic() > deadline:
+                if ticks_diff(ticks_ms(), start_time) > deadline:
                     raise RuntimeError("Unable to initialize UDP socket.")
 
             self._eth.src_port = 68
@@ -349,7 +362,8 @@ class DHCP:
             for attempt in range(4):  # Initial attempt plus 3 retries.
                 self._eth.socket_write(sock_num, _BUFF[:message_length])
                 next_resend = self._next_retry_time(attempt=attempt)
-                while time.monotonic() < next_resend:
+                start_time = ticks_ms()
+                while ticks_diff(ticks_ms(), start_time) < next_resend:
                     if self._receive_dhcp_response(sock_num, next_resend):
                         try:
                             msg_type_in = self._parse_dhcp_response()
@@ -382,17 +396,17 @@ class DHCP:
         self._blocking = blocking
         while True:
             if self._dhcp_state == _STATE_BOUND:
-                now = time.monotonic()
-                if now < self._t1:
+                now = ticks_ms()
+                if ticks_less(now, self._t1_timeout):
                     debug_msg("No timers have expired. Exiting FSM.", self._debug)
                     return
-                if now > self._lease:
+                if ticks_less(self._lease_timeout, now):
                     debug_msg(
                         "Lease has expired, switching state to INIT.", self._debug
                     )
                     self._blocking = True
                     self._dhcp_state = _STATE_INIT
-                elif now > self._t2:
+                elif ticks_less(self._t2_timeout, now):
                     debug_msg(
                         "T2 has expired, switching state to REBINDING.", self._debug
                     )
@@ -406,14 +420,20 @@ class DHCP:
             if self._dhcp_state == _STATE_RENEWING:
                 debug_msg("FSM state is RENEWING.", self._debug)
                 self._renew = "renew"
-                self._start_time = time.monotonic()
+                self._start_ticks = ticks_ms()
+                self._lease = None
+                self._t1 = None
+                self._t2 = None
                 self._dhcp_state = _STATE_REQUESTING
 
             if self._dhcp_state == _STATE_REBINDING:
                 debug_msg("FSM state is REBINDING.", self._debug)
                 self._renew = "rebind"
                 self.dhcp_server_ip = _BROADCAST_SERVER_ADDR
-                self._start_time = time.monotonic()
+                self._start_ticks = ticks_ms()
+                self._lease = None
+                self._t1 = None
+                self._t2 = None
                 self._dhcp_state = _STATE_REQUESTING
 
             if self._dhcp_state == _STATE_INIT:
@@ -486,7 +506,9 @@ class DHCP:
         # Transaction ID (xid)
         _BUFF[4:8] = self._transaction_id.to_bytes(4, "big")
         # Seconds elapsed
-        _BUFF[8:10] = int(time.monotonic() - self._start_time).to_bytes(2, "big")
+        _BUFF[8:10] = int(ticks_diff(ticks_ms(), self._start_ticks) / 1000).to_bytes(
+            2, "big"
+        )
         # Flags (only bit 0 is used, all other bits must be 0)
         if broadcast:
             _BUFF[10] = 0b10000000

@@ -31,103 +31,32 @@ license='MIT'
 * Adafruit CircuitPython firmware for the supported boards:
   https://github.com/adafruit/circuitpython/releases
 
+* Adafruit's Connection Manager library:
+  https://github.com/adafruit/Adafruit_CircuitPython_ConnectionManager
+
 """
 
 __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Requests.git"
 
 import errno
+import json as json_module
+import os
 import sys
 
-import json as json_module
+from adafruit_connection_manager import get_connection_manager
+
+SEEK_END = 2
 
 if not sys.implementation.name == "circuitpython":
-    from ssl import SSLContext
-    from types import ModuleType, TracebackType
-    from typing import Any, Dict, Optional, Tuple, Type, Union
+    from types import TracebackType
+    from typing import IO, Any, Dict, Optional, Type
 
-    try:
-        from typing import Protocol
-    except ImportError:
-        from typing_extensions import Protocol
-
-    # Based on https://github.com/python/typeshed/blob/master/stdlib/_socket.pyi
-    class CommonSocketType(Protocol):
-        """Describes the common structure every socket type must have."""
-
-        def send(self, data: bytes, flags: int = ...) -> None:
-            """Send data to the socket. The meaning of the optional flags kwarg is
-            implementation-specific."""
-
-        def settimeout(self, value: Optional[float]) -> None:
-            """Set a timeout on blocking socket operations."""
-
-        def close(self) -> None:
-            """Close the socket."""
-
-    class CommonCircuitPythonSocketType(CommonSocketType, Protocol):
-        """Describes the common structure every CircuitPython socket type must have."""
-
-        def connect(
-            self,
-            address: Tuple[str, int],
-            conntype: Optional[int] = ...,
-        ) -> None:
-            """Connect to a remote socket at the provided (host, port) address. The conntype
-            kwarg optionally may indicate SSL or not, depending on the underlying interface.
-            """
-
-    class SupportsRecvWithFlags(Protocol):
-        """Describes a type that posseses a socket recv() method supporting the flags kwarg."""
-
-        def recv(self, bufsize: int = ..., flags: int = ...) -> bytes:
-            """Receive data from the socket. The return value is a bytes object representing
-            the data received. The maximum amount of data to be received at once is specified
-            by bufsize. The meaning of the optional flags kwarg is implementation-specific.
-            """
-
-    class SupportsRecvInto(Protocol):
-        """Describes a type that possesses a socket recv_into() method."""
-
-        def recv_into(
-            self, buffer: bytearray, nbytes: int = ..., flags: int = ...
-        ) -> int:
-            """Receive up to nbytes bytes from the socket, storing the data into the provided
-            buffer. If nbytes is not specified (or 0), receive up to the size available in the
-            given buffer. The meaning of the optional flags kwarg is implementation-specific.
-            Returns the number of bytes received."""
-
-    class CircuitPythonSocketType(
-        CommonCircuitPythonSocketType,
-        SupportsRecvInto,
-        SupportsRecvWithFlags,
-        Protocol,
-    ):  # pylint: disable=too-many-ancestors
-        """Describes the structure every modern CircuitPython socket type must have."""
-
-    class StandardPythonSocketType(
-        CommonSocketType, SupportsRecvInto, SupportsRecvWithFlags, Protocol
-    ):
-        """Describes the structure every standard Python socket type must have."""
-
-        def connect(self, address: Union[Tuple[Any, ...], str, bytes]) -> None:
-            """Connect to a remote socket at the provided address."""
-
-    SocketType = Union[
-        CircuitPythonSocketType,
-        StandardPythonSocketType,
-    ]
-
-    SocketpoolModuleType = ModuleType
-
-    class InterfaceType(Protocol):
-        """Describes the structure every interface type must have."""
-
-        @property
-        def TLS_MODE(self) -> int:  # pylint: disable=invalid-name
-            """Constant representing that a socket's connection mode is TLS."""
-
-    SSLContextType = Union[SSLContext, "_FakeSSLContext"]
+    from circuitpython_typing.socket import (
+        SocketpoolModuleType,
+        SocketType,
+        SSLContextType,
+    )
 
 
 class _RawResponse:
@@ -146,7 +75,7 @@ class _RawResponse:
     def readinto(self, buf: bytearray) -> int:
         """Read as much as available into buf or until it is full. Returns the number of bytes read
         into buf."""
-        return self._response._readinto(buf)  # pylint: disable=protected-access
+        return self._response._readinto(buf)
 
 
 class OutOfRetries(Exception):
@@ -156,15 +85,29 @@ class OutOfRetries(Exception):
 class Response:
     """The response from a request, contains all the headers/content"""
 
-    # pylint: disable=too-many-instance-attributes
-
     encoding = None
+    socket: SocketType
+    """The underlying socket object (CircuitPython extension, not in standard requests)
 
-    def __init__(self, sock: SocketType, session: Optional["Session"] = None) -> None:
+    Under the following circumstances, calling code may directly access the underlying
+    socket object:
+
+     * The request was made with ``stream=True``
+     * The request headers included ``{'connection': 'close'}``
+     * No methods or properties on the Response object that access the response content
+       may be used
+
+    Methods and properties that access response headers may be accessed.
+
+    It is still necessary to ``close`` the response object for correct management of
+    sockets, including doing so implicitly via ``with requests.get(...) as response``."""
+
+    def __init__(self, sock: SocketType, session: "Session", method: str) -> None:
         self.socket = sock
         self.encoding = "utf-8"
         self._cached = None
         self._headers = {}
+        self._method = method
 
         # _start_index and _receive_buffer are used when parsing headers.
         # _receive_buffer will grow by 32 bytes everytime it is too small.
@@ -175,10 +118,7 @@ class Response:
 
         http = self._readto(b" ")
         if not http:
-            if session:
-                session._close_socket(self.socket)
-            else:
-                self.socket.close()
+            session._connection_manager.close_socket(self.socket)
             raise RuntimeError("Unable to read HTTP response.")
         self.status_code: int = int(bytes(self._readto(b" ")))
         """The status code returned by the server"""
@@ -252,9 +192,7 @@ class Response:
 
     def _readinto(self, buf: bytearray) -> int:
         if not self.socket:
-            raise RuntimeError(
-                "Newer Response closed this one. Use Responses immediately."
-            )
+            raise RuntimeError("Newer Response closed this one. Use Responses immediately.")
 
         if not self._remaining:
             # Consume the chunk header if need be.
@@ -304,25 +242,15 @@ class Response:
             to_read -= self._recv_into(buf, to_read)
 
     def close(self) -> None:
-        """Drain the remaining ESP socket buffers. We assume we already got what we wanted."""
+        """Close out the socket. If we have a session free it instead."""
         if not self.socket:
             return
-        # Make sure we've read all of our response.
-        if self._cached is None:
-            if self._remaining and self._remaining > 0:
-                self._throw_away(self._remaining)
-            elif self._chunked:
-                while True:
-                    chunk_header = bytes(self._readto(b"\r\n")).split(b";", 1)[0]
-                    chunk_size = int(bytes(chunk_header), 16)
-                    if chunk_size == 0:
-                        break
-                    self._throw_away(chunk_size + 2)
-                self._parse_headers()
+
         if self._session:
-            self._session._free_socket(self.socket)  # pylint: disable=protected-access
+            self._session._connection_manager.free_socket(self.socket)
         else:
             self.socket.close()
+
         self.socket = None
 
     def _parse_headers(self) -> None:
@@ -334,7 +262,8 @@ class Response:
             header = self._readto(b"\r\n")
             if not header:
                 break
-            title, content = bytes(header).split(b": ", 1)
+            title, content = bytes(header).split(b":", 1)
+            content = content.strip()
             if title and content:
                 # enforce that all headers are lowercase
                 title = str(title, "utf-8").lower()
@@ -348,12 +277,18 @@ class Response:
                 else:
                     self._headers[title] = content
 
+        # does the body have a fixed length? (of zero)
+        if (
+            self.status_code == 204
+            or self.status_code == 304
+            or 100 <= self.status_code < 200  # 1xx codes
+            or self._method == "HEAD"
+        ):
+            self._remaining = 0
+
     def _validate_not_gzip(self) -> None:
         """gzip encoding is not supported. Raise an exception if found."""
-        if (
-            "content-encoding" in self.headers
-            and self.headers["content-encoding"] == "gzip"
-        ):
+        if "content-encoding" in self.headers and self.headers["content-encoding"] == "gzip":
             raise ValueError(
                 "Content-encoding is gzip, data cannot be accessed as json or text. "
                 "Use content property to access raw bytes."
@@ -407,7 +342,7 @@ class Response:
         obj = json_module.load(self._raw)
         if not self._cached:
             self._cached = obj
-        self.close()
+
         return obj
 
     def iter_content(self, chunk_size: int = 1, decode_unicode: bool = False) -> bytes:
@@ -436,104 +371,90 @@ class Session:
         self,
         socket_pool: SocketpoolModuleType,
         ssl_context: Optional[SSLContextType] = None,
+        session_id: Optional[str] = None,
     ) -> None:
-        self._socket_pool = socket_pool
+        self._connection_manager = get_connection_manager(socket_pool)
         self._ssl_context = ssl_context
-        # Hang onto open sockets so that we can reuse them.
-        self._open_sockets = {}
-        self._socket_free = {}
+        self._session_id = session_id
         self._last_response = None
 
-    def _free_socket(self, socket: SocketType) -> None:
-        if socket not in self._open_sockets.values():
-            raise RuntimeError("Socket not from session")
-        self._socket_free[socket] = True
+    def _build_boundary_data(self, files: dict):  # pylint: disable=too-many-locals
+        boundary_string = self._build_boundary_string()
+        content_length = 0
+        boundary_objects = []
 
-    def _close_socket(self, sock: SocketType) -> None:
-        sock.close()
-        del self._socket_free[sock]
-        key = None
-        for k in self._open_sockets:  # pylint: disable=consider-using-dict-items
-            if self._open_sockets[k] == sock:
-                key = k
-                break
-        if key:
-            del self._open_sockets[key]
+        for field_name, field_values in files.items():
+            file_name = field_values[0]
+            file_handle = field_values[1]
 
-    def _free_sockets(self) -> None:
-        free_sockets = []
-        for sock, val in self._socket_free.items():
-            if val:
-                free_sockets.append(sock)
-        for sock in free_sockets:
-            self._close_socket(sock)
-
-    def _get_socket(
-        self, host: str, port: int, proto: str, *, timeout: float = 1
-    ) -> CircuitPythonSocketType:
-        # pylint: disable=too-many-branches
-        key = (host, port, proto)
-        if key in self._open_sockets:
-            sock = self._open_sockets[key]
-            if self._socket_free[sock]:
-                self._socket_free[sock] = False
-                return sock
-        if proto == "https:" and not self._ssl_context:
-            raise RuntimeError(
-                "ssl_context must be set before using adafruit_requests for https"
+            boundary_objects.append(
+                f'--{boundary_string}\r\nContent-Disposition: form-data; name="{field_name}"'
             )
-        addr_info = self._socket_pool.getaddrinfo(
-            host, port, 0, self._socket_pool.SOCK_STREAM
-        )[0]
-        retry_count = 0
-        sock = None
-        last_exc = None
-        while retry_count < 5 and sock is None:
-            if retry_count > 0:
-                if any(self._socket_free.items()):
-                    self._free_sockets()
-                else:
-                    raise RuntimeError("Sending request failed") from last_exc
-            retry_count += 1
+            if file_name is not None:
+                boundary_objects.append(f'; filename="{file_name}"')
+            boundary_objects.append("\r\n")
+            if len(field_values) >= 3:
+                file_content_type = field_values[2]
+                boundary_objects.append(f"Content-Type: {file_content_type}\r\n")
+            if len(field_values) >= 4:
+                file_headers = field_values[3]
+                for file_header_key, file_header_value in file_headers.items():
+                    boundary_objects.append(f"{file_header_key}: {file_header_value}\r\n")
+            boundary_objects.append("\r\n")
 
-            try:
-                sock = self._socket_pool.socket(addr_info[0], addr_info[1])
-            except OSError as exc:
-                last_exc = exc
+            if hasattr(file_handle, "read"):
+                content_length += self._get_file_length(file_handle)
+
+            boundary_objects.append(file_handle)
+            boundary_objects.append("\r\n")
+
+        boundary_objects.append(f"--{boundary_string}--\r\n")
+
+        for boundary_object in boundary_objects:
+            if isinstance(boundary_object, str):
+                content_length += len(boundary_object)
+
+        return boundary_string, content_length, boundary_objects
+
+    @staticmethod
+    def _build_boundary_string():
+        return os.urandom(16).hex()
+
+    @staticmethod
+    def _check_headers(headers: Dict[str, str]):
+        if not isinstance(headers, dict):
+            raise TypeError("Headers must be in dict format")
+
+        for key, value in headers.items():
+            if isinstance(value, (str, bytes)) or value is None:
                 continue
-            except RuntimeError as exc:
-                last_exc = exc
-                continue
+            raise TypeError(
+                f"Header part ({value}) from {key} must be of type str or bytes, not {type(value)}"
+            )
 
-            connect_host = addr_info[-1][0]
-            if proto == "https:":
-                sock = self._ssl_context.wrap_socket(sock, server_hostname=host)
-                connect_host = host
-            sock.settimeout(timeout)  # socket read timeout
+    @staticmethod
+    def _get_file_length(file_handle: IO):
+        is_binary = False
+        try:
+            file_handle.seek(0)
+            # read at least 4 bytes incase we are reading a b64 stream
+            content = file_handle.read(4)
+            is_binary = isinstance(content, bytes)
+        except UnicodeError:
+            is_binary = False
 
-            try:
-                sock.connect((connect_host, port))
-            except MemoryError as exc:
-                last_exc = exc
-                sock.close()
-                sock = None
-            except OSError as exc:
-                last_exc = exc
-                sock.close()
-                sock = None
+        if not is_binary:
+            raise ValueError("Files must be opened in binary mode")
 
-        if sock is None:
-            raise RuntimeError("Repeated socket failures") from last_exc
-
-        self._open_sockets[key] = sock
-        self._socket_free[sock] = False
-        return sock
+        file_handle.seek(0, SEEK_END)
+        content_length = file_handle.tell()
+        file_handle.seek(0)
+        return content_length
 
     @staticmethod
     def _send(socket: SocketType, data: bytes):
         total_sent = 0
         while total_sent < len(data):
-            # ESP32SPI sockets raise a RuntimeError when unable to send.
             try:
                 sent = socket.send(data[total_sent:])
             except OSError as exc:
@@ -543,6 +464,7 @@ class Session:
                 # Some worse error.
                 raise
             except RuntimeError as exc:
+                # ESP32SPI sockets raise a RuntimeError when unable to send.
                 raise OSError(errno.EIO) from exc
             if sent is None:
                 sent = len(data)
@@ -551,7 +473,38 @@ class Session:
                 raise OSError(errno.EIO)
             total_sent += sent
 
-    def _send_request(
+    def _send_as_bytes(self, socket: SocketType, data: str):
+        return self._send(socket, bytes(data, "utf-8"))
+
+    def _send_boundary_objects(self, socket: SocketType, boundary_objects: Any):
+        for boundary_object in boundary_objects:
+            if isinstance(boundary_object, str):
+                self._send_as_bytes(socket, boundary_object)
+            else:
+                self._send_file(socket, boundary_object)
+
+    def _send_file(self, socket: SocketType, file_handle: IO):
+        chunk_size = 36
+        b = bytearray(chunk_size)
+        while True:
+            size = file_handle.readinto(b)
+            if size == 0:
+                break
+            self._send(socket, b[:size])
+
+    def _send_header(self, socket, header, value):
+        if value is None:
+            return
+        self._send_as_bytes(socket, header)
+        self._send(socket, b": ")
+        if isinstance(value, bytes):
+            self._send(socket, value)
+        else:
+            self._send_as_bytes(socket, value)
+        self._send(socket, b"\r\n")
+
+    # noqa: PLR0912 Too many branches
+    def _send_request(  # noqa: PLR0913,PLR0912 Too many arguments in function definition,Too many branches
         self,
         socket: SocketType,
         host: str,
@@ -560,46 +513,81 @@ class Session:
         headers: Dict[str, str],
         data: Any,
         json: Any,
+        files: Optional[Dict[str, tuple]],
     ):
-        # pylint: disable=too-many-arguments
-        self._send(socket, bytes(method, "utf-8"))
-        self._send(socket, b" /")
-        self._send(socket, bytes(path, "utf-8"))
-        self._send(socket, b" HTTP/1.1\r\n")
-        if "Host" not in headers:
-            self._send(socket, b"Host: ")
-            self._send(socket, bytes(host, "utf-8"))
-            self._send(socket, b"\r\n")
-        if "User-Agent" not in headers:
-            self._send(socket, b"User-Agent: Adafruit CircuitPython\r\n")
-        # Iterate over keys to avoid tuple alloc
-        for k in headers:
-            self._send(socket, k.encode())
-            self._send(socket, b": ")
-            self._send(socket, headers[k].encode())
-            self._send(socket, b"\r\n")
+        # Check headers
+        self._check_headers(headers)
+
+        # Convert data
+        content_type_header = None
+
+        # If json is sent, set content type header and convert to string
         if json is not None:
             assert data is None
+            assert files is None
+            content_type_header = "application/json"
             data = json_module.dumps(json)
-            self._send(socket, b"Content-Type: application/json\r\n")
-        if data:
-            if isinstance(data, dict):
-                self._send(
-                    socket, b"Content-Type: application/x-www-form-urlencoded\r\n"
-                )
-                _post_data = ""
-                for k in data:
-                    _post_data = "{}&{}={}".format(_post_data, k, data[k])
-                data = _post_data[1:]
-            if isinstance(data, str):
-                data = bytes(data, "utf-8")
-            self._send(socket, b"Content-Length: %d\r\n" % len(data))
-        self._send(socket, b"\r\n")
-        if data:
-            self._send(socket, bytes(data))
 
-    # pylint: disable=too-many-branches, too-many-statements, unused-argument, too-many-arguments, too-many-locals
-    def request(
+        # If data is sent and it's a dict, set content type header and convert to string
+        if data and isinstance(data, dict):
+            assert files is None
+            content_type_header = "application/x-www-form-urlencoded"
+            _post_data = ""
+            for k in data:
+                _post_data = f"{_post_data}&{k}={data[k]}"
+            # remove first "&" from concatenation
+            data = _post_data[1:]
+
+        # Convert str data to bytes
+        if data and isinstance(data, str):
+            data = bytes(data, "utf-8")
+
+        # If files are send, build data to send and calculate length
+        content_length = 0
+        data_is_file = False
+        boundary_objects = None
+        if files and isinstance(files, dict):
+            boundary_string, content_length, boundary_objects = self._build_boundary_data(files)
+            content_type_header = f"multipart/form-data; boundary={boundary_string}"
+        elif data and hasattr(data, "read"):
+            data_is_file = True
+            content_length = self._get_file_length(data)
+        else:
+            if data is None:
+                data = b""
+            content_length = len(data)
+
+        self._send_as_bytes(socket, method)
+        self._send(socket, b" /")
+        self._send_as_bytes(socket, path)
+        self._send(socket, b" HTTP/1.1\r\n")
+
+        # create lower-case supplied header list
+        supplied_headers = {header.lower() for header in headers}
+
+        # Send headers
+        if not "host" in supplied_headers:
+            self._send_header(socket, "Host", host)
+        if not "user-agent" in supplied_headers:
+            self._send_header(socket, "User-Agent", "Adafruit CircuitPython")
+        if content_type_header and not "content-type" in supplied_headers:
+            self._send_header(socket, "Content-Type", content_type_header)
+        if (data or files) and not "content-length" in supplied_headers:
+            self._send_header(socket, "Content-Length", str(content_length))
+        # Iterate over keys to avoid tuple alloc
+        for header in headers:
+            self._send_header(socket, header, headers[header])
+        self._send(socket, b"\r\n")
+
+        # Send data
+        if data_is_file:
+            self._send_file(socket, data)
+        elif data:
+            self._send(socket, bytes(data))
+        elif boundary_objects:
+            self._send_boundary_objects(socket, boundary_objects)
+
+    def request(  # noqa: PLR0912,PLR0913,PLR0915 Too many branches,Too many arguments in function definition,Too many statements
         self,
         method: str,
         url: str,
@@ -609,6 +597,7 @@ class Session:
         stream: bool = False,
         timeout: float = 60,
         allow_redirects: bool = True,
+        files: Optional[Dict[str, tuple]] = None,
     ) -> Response:
         """Perform an HTTP request to the given url which we will parse to determine
         whether to use SSL ('https://') or not. We can also send some provided 'data'
@@ -643,38 +632,55 @@ class Session:
 
         # We may fail to send the request if the socket we got is closed already. So, try a second
         # time in that case.
+        # Note that the loop below actually tries a second time in other failure cases too,
+        # namely timeout and no data from socket. This was not covered in the stated intent of the
+        # commit that introduced the loop, but removing the retry from those cases could prove
+        # problematic to callers that now depend on that resiliency.
         retry_count = 0
         last_exc = None
         while retry_count < 2:
             retry_count += 1
-            socket = self._get_socket(host, port, proto, timeout=timeout)
+            socket = self._connection_manager.get_socket(
+                host,
+                port,
+                proto,
+                session_id=self._session_id,
+                timeout=timeout,
+                ssl_context=self._ssl_context,
+            )
             ok = True
             try:
-                self._send_request(socket, host, method, path, headers, data, json)
+                self._send_request(socket, host, method, path, headers, data, json, files)
             except OSError as exc:
                 last_exc = exc
                 ok = False
             if ok:
                 # Read the H of "HTTP/1.1" to make sure the socket is alive. send can appear to work
                 # even when the socket is closed.
-                if hasattr(socket, "recv"):
-                    result = socket.recv(1)
-                else:
-                    result = bytearray(1)
-                    try:
+                # Both recv/recv_into can raise OSError; when that happens, we need to call
+                # _connection_manager.close_socket(socket) or future calls to
+                # _connection_manager.get_socket() for the same parameter set will fail
+                try:
+                    if hasattr(socket, "recv"):
+                        result = socket.recv(1)
+                    else:
+                        result = bytearray(1)
                         socket.recv_into(result)
-                    except OSError:
-                        pass
-                if result == b"H":
-                    # Things seem to be ok so break with socket set.
-                    break
-            self._close_socket(socket)
+                    if result == b"H":
+                        # Things seem to be ok so break with socket set.
+                        break
+                    else:
+                        raise RuntimeError("no data from socket")
+                except (OSError, RuntimeError) as exc:
+                    last_exc = exc
+                    pass
+            self._connection_manager.close_socket(socket)
             socket = None
 
         if not socket:
             raise OutOfRetries("Repeated socket failures") from last_exc
 
-        resp = Response(socket, self)  # our response
+        resp = Response(socket, self, method)  # our response
         if allow_redirects:
             if "location" in resp.headers and 300 <= resp.status_code <= 399:
                 # a naive handler for redirects
@@ -702,6 +708,10 @@ class Session:
         self._last_response = resp
         return resp
 
+    def options(self, url: str, **kw) -> Response:
+        """Send HTTP OPTIONS request"""
+        return self.request("OPTIONS", url, **kw)
+
     def head(self, url: str, **kw) -> Response:
         """Send HTTP HEAD request"""
         return self.request("HEAD", url, **kw)
@@ -725,103 +735,3 @@ class Session:
     def delete(self, url: str, **kw) -> Response:
         """Send HTTP DELETE request"""
         return self.request("DELETE", url, **kw)
-
-
-# Backwards compatible API:
-
-_default_session = None  # pylint: disable=invalid-name
-
-
-class _FakeSSLSocket:
-    def __init__(self, socket: CircuitPythonSocketType, tls_mode: int) -> None:
-        self._socket = socket
-        self._mode = tls_mode
-        self.settimeout = socket.settimeout
-        self.send = socket.send
-        self.recv = socket.recv
-        self.close = socket.close
-        self.recv_into = socket.recv_into
-
-    def connect(self, address: Tuple[str, int]) -> None:
-        """connect wrapper to add non-standard mode parameter"""
-        try:
-            return self._socket.connect(address, self._mode)
-        except RuntimeError as error:
-            raise OSError(errno.ENOMEM) from error
-
-
-class _FakeSSLContext:
-    def __init__(self, iface: InterfaceType) -> None:
-        self._iface = iface
-
-    def wrap_socket(
-        self, socket: CircuitPythonSocketType, server_hostname: Optional[str] = None
-    ) -> _FakeSSLSocket:
-        """Return the same socket"""
-        # pylint: disable=unused-argument
-        return _FakeSSLSocket(socket, self._iface.TLS_MODE)
-
-
-def set_socket(
-    sock: SocketpoolModuleType, iface: Optional[InterfaceType] = None
-) -> None:
-    """Legacy API for setting the socket and network interface. Use a `Session` instead."""
-    global _default_session  # pylint: disable=global-statement,invalid-name
-    if not iface:
-        # pylint: disable=protected-access
-        _default_session = Session(sock, _FakeSSLContext(sock._the_interface))
-    else:
-        _default_session = Session(sock, _FakeSSLContext(iface))
-    sock.set_interface(iface)
-
-
-def request(
-    method: str,
-    url: str,
-    data: Optional[Any] = None,
-    json: Optional[Any] = None,
-    headers: Optional[Dict[str, str]] = None,
-    stream: bool = False,
-    timeout: float = 1,
-) -> None:
-    """Send HTTP request"""
-    # pylint: disable=too-many-arguments
-    _default_session.request(
-        method,
-        url,
-        data=data,
-        json=json,
-        headers=headers,
-        stream=stream,
-        timeout=timeout,
-    )
-
-
-def head(url: str, **kw):
-    """Send HTTP HEAD request"""
-    return _default_session.request("HEAD", url, **kw)
-
-
-def get(url: str, **kw):
-    """Send HTTP GET request"""
-    return _default_session.request("GET", url, **kw)
-
-
-def post(url: str, **kw):
-    """Send HTTP POST request"""
-    return _default_session.request("POST", url, **kw)
-
-
-def put(url: str, **kw):
-    """Send HTTP PUT request"""
-    return _default_session.request("PUT", url, **kw)
-
-
-def patch(url: str, **kw):
-    """Send HTTP PATCH request"""
-    return _default_session.request("PATCH", url, **kw)
-
-
-def delete(url: str, **kw):
-    """Send HTTP DELETE request"""
-    return _default_session.request("DELETE", url, **kw)
