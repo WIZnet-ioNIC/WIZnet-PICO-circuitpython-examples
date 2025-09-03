@@ -11,30 +11,24 @@ Please refer to [getting_stared.md][link-getting_started] for examples usage.
 # :black_nib:Directory Structure
 
 ``` bash
-├─examples
-│  ├─Adafruit_IO
-│  │  ├─DownLink
-│  │  ├─Up&DownLink
-│  │  └─UpLink
-│  ├─DHCP
-│  ├─DNS
-│  ├─HTTP
-│  │  ├─Webclient
-│  │  └─Webserver
-│  ├─Loopback
-│  ├─MQTT
-│  │  ├─Publish
-│  │  ├─PubSub
-│  │  └─Subscribe
-│  ├─Neopixel
-│  ├─Network
-│  └─SNTP
-└─libraries
-    ├─adafruit_bus_device
-    ├─adafruit_io
-    ├─adafruit_minimqtt
-    ├─adafruit_wiznet5k  
-    └─adafruit_wsgi
+├─Adafruit_IO
+├─DownLink
+├─Up&DownLink
+│  └─UpLink
+├─DHCP
+├─DNS
+├─HTTP
+│  ├─Webclient
+│  └─Webserver
+├─Loopback
+├─MQTT
+│  ├─Publish
+│  ├─PubSub
+│  └─Subscribe
+├─Neopixel
+├─Network
+└─SNTP
+
 ```
 
 
